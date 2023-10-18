@@ -1,15 +1,23 @@
 import java.io.BufferedReader;
+import java.io.File;
 import java.io.FileReader;
 import java.io.IOException;
+import java.io.InputStreamReader;
+import java.net.HttpURLConnection;
+import java.net.URL;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
+import java.text.DecimalFormat;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.Map;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 import java.util.stream.Stream;
+
+import tloc.Tloc;
+import tassert.Tassert;
 
 public class App {
     public static void main(String[] args) throws Exception {
@@ -64,23 +72,51 @@ public class App {
 
         ArrayList<Map<String, String>> src_files_data = new ArrayList<Map<String, String>>();
 
+        System.out.println(test_files.size());
+        System.out.println(src_files.size());
+
+        DecimalFormat df = new DecimalFormat("0.00");
         for(int i = 0; i < test_files.size(); i++){
+            
             Map<String, String> file_data = new HashMap<>();
             String content = getFileContent(test_files.get(i));
+
+            content = removeLegalHeader(content, 35);
 
             String package_name = getPackageName(content);
             String class_name = getClassName(content);
 
             int test_count = getTestCount(content);
 
+            int tloc = Tloc.getTloc(test_files.get(i));
+
+            int tassert = Tassert.getTassert(test_files.get(i));
+
+            if(tloc == 0 || tassert == 0){
+                //TODO
+                continue;
+            }
+
+            String tcmp = df.format((double)tloc / (double)tassert);
+
+            int cloc = getCloc(content);
+
+            String dc = df.format((double)cloc / (double)tloc);
+
+            int header_comment_count = getHeaderCommentCount(content);
+
             file_data.put("package_name", package_name);
             file_data.put("class_name", class_name);
             file_data.put("test_count", Integer.toString(test_count));
-
+            file_data.put("tloc", Integer.toString(tloc));
+            file_data.put("tassert", Integer.toString(tassert));
+            file_data.put("tcmp", tcmp);
+            file_data.put("dc", dc);
+            file_data.put("header_comment_count", Integer.toString(header_comment_count));
             test_files_data.add(file_data);
         }
 
-
+        System.out.println(test_files_data);
 
         for(int i = 0; i < src_files.size(); i++){
             Map<String, String> file_data = new HashMap<>();
@@ -90,16 +126,91 @@ public class App {
 
             int method_count = getMethodCount(content);
 
+            int loc = Tloc.getTloc(src_files.get(i));
+
             file_data.put("class_name", class_name);
             file_data.put("method_count", Integer.toString(method_count));
             file_data.put("file_path", src_files.get(i));
+            file_data.put("loc", Integer.toString(loc));
 
             src_files_data.add(file_data);
         }
         
-        System.out.println(src_files_data);
-        
+       /*  try{
+            getRepoData();
+        } catch(InterruptedException e){
+            System.out.println(e);
+        } */
+       
+
     }   
+
+    //Get the repo's commit history
+    /* private static String getRepoData(String path) throws IOException, InterruptedException{
+        System.out.println(path.substring(24, path.length()));
+        try {
+            String apiUrl = "https://api.github.com/repos/jfree/jfreechart/commits?path=" + path.substring(24, path.length()).replace('\\', '/');
+            URL url = new URL(apiUrl);
+
+            // Set up authentication if necessary
+            String authToken = "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";
+            HttpURLConnection connection = (HttpURLConnection) url.openConnection();
+            connection.setRequestMethod("GET");
+            connection.setRequestProperty("Authorization", "Bearer " + authToken);
+
+            BufferedReader reader = new BufferedReader(new InputStreamReader(connection.getInputStream()));
+            String line;
+            StringBuilder response = new StringBuilder();
+
+            while ((line = reader.readLine()) != null) {
+                response.append(line);
+            }
+            reader.close();
+
+            // Parse the JSON response to extract the date of the last commit
+            System.out.println(response);
+            //System.out.println("Last commit date of " + filePath + ": " + extractedCommitDate);
+        } catch (Exception e) {
+            e.printStackTrace();
+        }
+        return "HERE";
+    } */
+
+    private static int getHeaderCommentCount(String content){
+        String[] lines = content.split("\n");
+        String previous_line = "";
+        String current_line = "";
+
+        int comment_count = 0;
+
+        for(int i = 0; i < lines.length; i++){
+            if(!lines[i].isEmpty()){
+                previous_line = current_line;
+                current_line = lines[i];
+
+                if(current_line.trim().equals("@Test") && (previous_line.trim().endsWith("*/") || previous_line.trim().startsWith("//"))){
+                    comment_count++;
+                }
+            }
+           
+        }
+        return comment_count;
+    }
+
+    private static String removeLegalHeader(String content, int line_count){
+        String[] lines = content.split("\n");
+
+        // Reconstruct the code by skipping the first 35 lines
+        StringBuilder new_code = new StringBuilder();
+        for (int i = line_count; i < lines.length; i++) {
+            new_code.append(lines[i]);
+            if (i < lines.length - 1) {
+                new_code.append("\n"); // Add a line break if not the last line
+            }
+        }
+
+        return new_code.toString();
+    }
 
     private static int getTestCount(String content){
         content = removeCommentsFromFile(content);
@@ -135,6 +246,38 @@ public class App {
         content = removeContentBetweenDelimiters(content, "//", "\n");
 
         return content;
+    }
+
+    private static int getCloc(String content){
+        //Remove all the content between comments
+        String data = getContentBetweenDelimiters(content);
+
+        String[] lines = data.split("\n");
+
+        int cloc = 0;
+
+        //Count every line that isn't empty
+        for(int i = 0; i < lines.length; i++){
+            if(!lines[i].trim().isEmpty()){
+                cloc++;
+            }
+        }
+
+        return cloc;
+    }
+
+    public static String getContentBetweenDelimiters(String content) {
+        String data = "";
+        // Regular expression to match both block and single-line comments
+        String regex = "(\\/\\*[^*]*\\*+(?:[^/*][^*]*\\*+)*\\/|\\/\\/[^\\r\\n]*)";
+        Pattern pattern = Pattern.compile(regex, Pattern.DOTALL);
+        Matcher matcher = pattern.matcher(content);
+
+        while (matcher.find()) {
+            String comment = matcher.group(1);
+            data += comment;
+        }
+        return data;
     }
 
     //Function that removes all content between delimiters except "\n" including the delimiters themselves
