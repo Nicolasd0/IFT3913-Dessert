@@ -1,15 +1,23 @@
 import java.io.BufferedReader;
+import java.io.File;
 import java.io.FileReader;
 import java.io.IOException;
+import java.io.InputStreamReader;
+import java.net.HttpURLConnection;
+import java.net.URL;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
+import java.text.DecimalFormat;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.Map;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 import java.util.stream.Stream;
+
+import tloc.Tloc;
+import tassert.Tassert;
 
 public class App {
     public static void main(String[] args) throws Exception {
@@ -64,19 +72,50 @@ public class App {
 
         ArrayList<Map<String, String>> src_files_data = new ArrayList<Map<String, String>>();
 
+        DecimalFormat df = new DecimalFormat("0.00");
+
+        int total_test_count = 0;
+
+        int total_loc = 0;
+        int total_tloc = 0;
+        int total_cloc = 0;
+        int total_tassert = 0;
+        int total_header_comment = 0;
+
+        ArrayList<String> found_packages = new ArrayList<String>();
         for(int i = 0; i < test_files.size(); i++){
+            
             Map<String, String> file_data = new HashMap<>();
             String content = getFileContent(test_files.get(i));
 
-            String package_name = getPackageName(content);
+            content = removeLegalHeader(content, 35);
+
             String class_name = getClassName(content);
 
-            int test_count = getTestCount(content);
+            String package_name = getPackageName(content);
+            
 
-            file_data.put("package_name", package_name);
+            if(found_packages.indexOf(package_name) == -1){
+                found_packages.add(package_name);
+            }
+
+            int test_count = getTestCount(content);
+            total_test_count += test_count;
+
+            int tloc = Tloc.getTloc(test_files.get(i));
+
+            total_tloc += tloc;
+
+            total_cloc += getCloc(content);
+
+            int tassert = Tassert.getTassert(test_files.get(i));
+
+            total_tassert += tassert;
+
+            total_header_comment += getHeaderCommentCount(content);
+
             file_data.put("class_name", class_name);
             file_data.put("test_count", Integer.toString(test_count));
-
             test_files_data.add(file_data);
         }
 
@@ -90,16 +129,143 @@ public class App {
 
             int method_count = getMethodCount(content);
 
+
+            total_loc += Tloc.getTloc(src_files.get(i));
+
             file_data.put("class_name", class_name);
             file_data.put("method_count", Integer.toString(method_count));
-            file_data.put("file_path", src_files.get(i));
 
             src_files_data.add(file_data);
         }
         
-        System.out.println(src_files_data);
-        
+       
+       
+        double tpc = (double)total_test_count / (double)test_files_data.size();
+
+
+        double tpp = (double)total_test_count / (double)found_packages.size();
+
+        int total_method_count = 0;
+        int files_not_tested = 0;
+        for(int i = 0; i < test_files_data.size(); i++){
+            
+            Map<String, String> test_file = test_files_data.get(i);
+            
+            for(int j = 0; j < src_files_data.size(); j++){
+                Map<String, String> src_file = src_files_data.get(j);
+
+                String test_class_name = test_file.get("class_name");
+                test_class_name = test_class_name.substring(0, test_class_name.length() - 4);
+
+                if(test_class_name.equals(src_file.get("class_name"))){
+                    
+                    int test_count = Integer.parseInt(test_file.get("test_count"));
+                    int method_count = Integer.parseInt(src_file.get("method_count"));
+
+                    total_method_count += method_count;
+                    if(test_count < method_count){
+                        files_not_tested += method_count - test_count;
+                    }
+
+                    src_files_data.remove(j);
+                    j--;
+                }
+
+            }
+        }
+
+        double pmnt = (double)files_not_tested / (double)total_method_count;
+
+        double tloc_loc_ratio = (double)total_tloc / (double)total_loc;
+
+        double tcmp = Double.parseDouble(df.format((double)total_tassert / (double)total_tloc));
+
+        double dc = (double)total_cloc / (double)total_tloc;
+
+        double header_comment_ratio = (double)total_header_comment / (double)total_test_count;
+
+        System.out.println("TPC (tests par classe): " + df.format(tpc));
+        System.out.println("TPP (tests par package): " + df.format(tpp));
+        System.out.println("PMNT (pourcentage de méthodes non testés): " + df.format(pmnt * 100) + "%");
+        System.out.println("Tloc / Loc (Ratio du nombre de ligne de code de test  sur le nombre de ligne de code source pour une classe): " + df.format(tloc_loc_ratio * 100) + "%");
+        System.out.println("TASSERT: " + total_tassert);
+        System.out.println("TCMP (Tassert / Tloc): " + df.format(tcmp * 100) + "%");
+        System.out.println("DC (densité de commentaires): " + df.format(dc * 100) + "%");
+        System.out.println("Ratio du nombre de fonctions contenant des commentaires en entête sur le nombre total de fonctions d'une classe de test: " + df.format(header_comment_ratio * 100) + "%");
+
+        /*  try{
+            getRepoData();
+        } catch(InterruptedException e){
+            System.out.println(e);
+        } */
     }   
+
+    //Get the repo's commit history
+    /* private static String getRepoData(String path) throws IOException, InterruptedException{
+        System.out.println(path.substring(24, path.length()));
+        try {
+            String apiUrl = "https://api.github.com/repos/jfree/jfreechart/commits?path=" + path.substring(24, path.length()).replace('\\', '/');
+            URL url = new URL(apiUrl);
+
+            // Set up authentication if necessary
+            String authToken = "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";
+            HttpURLConnection connection = (HttpURLConnection) url.openConnection();
+            connection.setRequestMethod("GET");
+            connection.setRequestProperty("Authorization", "Bearer " + authToken);
+
+            BufferedReader reader = new BufferedReader(new InputStreamReader(connection.getInputStream()));
+            String line;
+            StringBuilder response = new StringBuilder();
+
+            while ((line = reader.readLine()) != null) {
+                response.append(line);
+            }
+            reader.close();
+
+            // Parse the JSON response to extract the date of the last commit
+            System.out.println(response);
+            //System.out.println("Last commit date of " + filePath + ": " + extractedCommitDate);
+        } catch (Exception e) {
+            e.printStackTrace();
+        }
+        return "HERE";
+    } */
+
+    private static int getHeaderCommentCount(String content){
+        String[] lines = content.split("\n");
+        String previous_line = "";
+        String current_line = "";
+
+        int comment_count = 0;
+
+        for(int i = 0; i < lines.length; i++){
+            if(!lines[i].isEmpty()){
+                previous_line = current_line;
+                current_line = lines[i];
+
+                if(current_line.trim().equals("@Test") && (previous_line.trim().endsWith("*/") || previous_line.trim().startsWith("//"))){
+                    comment_count++;
+                }
+            }
+           
+        }
+        return comment_count;
+    }
+
+    private static String removeLegalHeader(String content, int line_count){
+        String[] lines = content.split("\n");
+
+        // Reconstruct the code by skipping the first 35 lines
+        StringBuilder new_code = new StringBuilder();
+        for (int i = line_count; i < lines.length; i++) {
+            new_code.append(lines[i]);
+            if (i < lines.length - 1) {
+                new_code.append("\n"); // Add a line break if not the last line
+            }
+        }
+
+        return new_code.toString();
+    }
 
     private static int getTestCount(String content){
         content = removeCommentsFromFile(content);
@@ -123,7 +289,21 @@ public class App {
 
         // Count the methods
         while (matcher.find()) {
-            method_count++;
+            String method_declaration = matcher.group(0);
+            method_declaration = method_declaration.split("\n")[0];
+            String[] declaration_parts = method_declaration.split(" ");
+            String method_name = declaration_parts[2];
+            String static_method_name = "";
+            if(declaration_parts.length > 3){
+                static_method_name = method_declaration.split(" ")[3];
+            }
+           
+            // Check if the method name starts with "get" or "set" and exclude it
+            if (!method_name.startsWith("set") && !method_name.startsWith("get") 
+                && !static_method_name.startsWith("set") && !static_method_name.startsWith("get")) {
+                
+                method_count++;
+            }
         }
         return method_count;
     }
@@ -135,6 +315,38 @@ public class App {
         content = removeContentBetweenDelimiters(content, "//", "\n");
 
         return content;
+    }
+
+    private static int getCloc(String content){
+        //Remove all the content between comments
+        String data = getContentBetweenDelimiters(content);
+
+        String[] lines = data.split("\n");
+
+        int cloc = 0;
+
+        //Count every line that isn't empty
+        for(int i = 0; i < lines.length; i++){
+            if(!lines[i].trim().isEmpty()){
+                cloc++;
+            }
+        }
+
+        return cloc;
+    }
+
+    public static String getContentBetweenDelimiters(String content) {
+        String data = "";
+        // Regular expression to match both block and single-line comments
+        String regex = "(\\/\\*[^*]*\\*+(?:[^/*][^*]*\\*+)*\\/|\\/\\/[^\\r\\n]*)";
+        Pattern pattern = Pattern.compile(regex, Pattern.DOTALL);
+        Matcher matcher = pattern.matcher(content);
+
+        while (matcher.find()) {
+            String comment = matcher.group(1);
+            data += comment;
+        }
+        return data;
     }
 
     //Function that removes all content between delimiters except "\n" including the delimiters themselves
