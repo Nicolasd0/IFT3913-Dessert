@@ -119,7 +119,7 @@ public class App {
             test_files_data.add(file_data);
         }
 
-
+        System.out.println(test_files_data);
 
         for(int i = 0; i < src_files.size(); i++){
             Map<String, String> file_data = new HashMap<>();
