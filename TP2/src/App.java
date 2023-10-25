@@ -1,6 +1,8 @@
 import java.io.BufferedReader;
+import java.io.BufferedWriter;
 import java.io.File;
 import java.io.FileReader;
+import java.io.FileWriter;
 import java.io.IOException;
 import java.io.InputStreamReader;
 import java.net.HttpURLConnection;
@@ -21,9 +23,18 @@ import tassert.Tassert;
 
 public class App {
     public static void main(String[] args) throws Exception {
-        getMetrics(args[0]);
+        //Main metrics function call
+        String metrics = getMetrics(args[0]);
+
+        //Optionally print to CSV file
+        if(args.length > 1){
+            String header = "TPC, TPP, PMNT, Tloc / Loc, Tassert, Tcmp, DC, Header Comment Ratio";
+            writeToCSV(args[1], header, metrics);
+        }
+       
     }
 
+    //Gets all file paths from the root folder of a project 
     private static ArrayList<String> getFilesInFolder(String path, boolean test) throws IOException{
         ArrayList<String> files = new ArrayList<String>();
         try (Stream<Path> stream = Files.walk(Paths.get(path))) {
@@ -60,7 +71,18 @@ public class App {
         return data;
     }
 
-    private static void getMetrics(String folder_path) throws IOException{
+    //Function to print to a CSV
+    private static void writeToCSV(String path, String header, String data) throws IOException{
+        FileWriter fileWriter = new FileWriter(path);
+        BufferedWriter bufferedWriter = new BufferedWriter(fileWriter);
+        bufferedWriter.write(header);
+        bufferedWriter.newLine();
+        bufferedWriter.write(data);
+        bufferedWriter.newLine();
+        bufferedWriter.close();
+    }
+
+    private static String getMetrics(String folder_path) throws IOException{
         //Get test files
         ArrayList<String> test_files = getFilesInFolder(folder_path, true);
         
@@ -74,17 +96,19 @@ public class App {
 
         DecimalFormat df = new DecimalFormat("0.00");
 
+        //Counts that will be used to calculate the different metrics
         int total_test_count = 0;
-
         int total_loc = 0;
         int total_tloc = 0;
         int total_cloc = 0;
         int total_tassert = 0;
         int total_header_comment = 0;
 
+        //Unique package list
         ArrayList<String> found_packages = new ArrayList<String>();
+
+        //Metrics related to test files
         for(int i = 0; i < test_files.size(); i++){
-            
             Map<String, String> file_data = new HashMap<>();
             String content = getFileContent(test_files.get(i));
 
@@ -119,8 +143,7 @@ public class App {
             test_files_data.add(file_data);
         }
 
-        System.out.println(test_files_data);
-
+        //Metrics related to source files
         for(int i = 0; i < src_files.size(); i++){
             Map<String, String> file_data = new HashMap<>();
             String content = getFileContent(src_files.get(i));
@@ -137,14 +160,9 @@ public class App {
 
             src_files_data.add(file_data);
         }
-        
-       
-       
-        double tpc = (double)total_test_count / (double)test_files_data.size();
 
 
-        double tpp = (double)total_test_count / (double)found_packages.size();
-
+        //Metrics that require mapping between test class and source class
         int total_method_count = 0;
         int files_not_tested = 0;
         for(int i = 0; i < test_files_data.size(); i++){
@@ -174,6 +192,10 @@ public class App {
             }
         }
 
+        //Aggregation of metrics
+        double tpc = (double)total_test_count / (double)test_files_data.size();
+        double tpp = (double)total_test_count / (double)found_packages.size();
+
         double pmnt = (double)files_not_tested / (double)total_method_count;
 
         double tloc_loc_ratio = (double)total_tloc / (double)total_loc;
@@ -184,53 +206,15 @@ public class App {
 
         double header_comment_ratio = (double)total_header_comment / (double)total_test_count;
 
-        System.out.println("TPC (tests par classe): " + df.format(tpc));
-        System.out.println("TPP (tests par package): " + df.format(tpp));
-        System.out.println("PMNT (pourcentage de méthodes non testés): " + df.format(pmnt * 100) + "%");
-        System.out.println("Tloc / Loc (Ratio du nombre de ligne de code de test  sur le nombre de ligne de code source pour une classe): " + df.format(tloc_loc_ratio * 100) + "%");
-        System.out.println("TASSERT: " + total_tassert);
-        System.out.println("TCMP (Tassert / Tloc): " + df.format(tcmp * 100) + "%");
-        System.out.println("DC (densité de commentaires): " + df.format(dc * 100) + "%");
-        System.out.println("Ratio du nombre de fonctions contenant des commentaires en entête sur le nombre total de fonctions d'une classe de test: " + df.format(header_comment_ratio * 100) + "%");
+        //Print metrics to console
+        System.out.println("TPC, TPP, PMNT, Tloc / Loc, Tassert, Tcmp, DC, Header Comment Ratio");
 
-        /*  try{
-            getRepoData();
-        } catch(InterruptedException e){
-            System.out.println(e);
-        } */
+        System.out.println(String.format("%s, %s, %s, %s, %s, %s, %s, %s", df.format(tpc), df.format(tpp), df.format(pmnt * 100) + "%", df.format(tloc_loc_ratio * 100) + "%", total_tassert, df.format(tcmp * 100) + "%", df.format(dc * 100) + "%", df.format(header_comment_ratio * 100) + "%"));
+
+        return String.format("%s, %s, %s, %s, %s, %s, %s, %s", df.format(tpc), df.format(tpp), df.format(pmnt * 100) + "%", df.format(tloc_loc_ratio * 100) + "%", total_tassert, df.format(tcmp * 100) + "%", df.format(dc * 100) + "%", df.format(header_comment_ratio * 100) + "%");
     }   
 
-    //Get the repo's commit history
-    /* private static String getRepoData(String path) throws IOException, InterruptedException{
-        System.out.println(path.substring(24, path.length()));
-        try {
-            String apiUrl = "https://api.github.com/repos/jfree/jfreechart/commits?path=" + path.substring(24, path.length()).replace('\\', '/');
-            URL url = new URL(apiUrl);
-
-            // Set up authentication if necessary
-            String authToken = "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";
-            HttpURLConnection connection = (HttpURLConnection) url.openConnection();
-            connection.setRequestMethod("GET");
-            connection.setRequestProperty("Authorization", "Bearer " + authToken);
-
-            BufferedReader reader = new BufferedReader(new InputStreamReader(connection.getInputStream()));
-            String line;
-            StringBuilder response = new StringBuilder();
-
-            while ((line = reader.readLine()) != null) {
-                response.append(line);
-            }
-            reader.close();
-
-            // Parse the JSON response to extract the date of the last commit
-            System.out.println(response);
-            //System.out.println("Last commit date of " + filePath + ": " + extractedCommitDate);
-        } catch (Exception e) {
-            e.printStackTrace();
-        }
-        return "HERE";
-    } */
-
+    //Calculates the amount of methods that contain a comment before it's declaration
     private static int getHeaderCommentCount(String content){
         String[] lines = content.split("\n");
         String previous_line = "";
@@ -252,10 +236,11 @@ public class App {
         return comment_count;
     }
 
+    //Each file has a commented legal header, we remove it for our metrics to be more accurate
     private static String removeLegalHeader(String content, int line_count){
         String[] lines = content.split("\n");
 
-        // Reconstruct the code by skipping the first 35 lines
+        //Reconstruct the code by skipping the first 35 lines
         StringBuilder new_code = new StringBuilder();
         for (int i = line_count; i < lines.length; i++) {
             new_code.append(lines[i]);
@@ -267,27 +252,29 @@ public class App {
         return new_code.toString();
     }
 
+    //Get's the amount of tests in a class
     private static int getTestCount(String content){
         content = removeCommentsFromFile(content);
 
         return content.split("@Test").length - 1;
     }
 
+    //Get's the amount of methods in a class
     private static int getMethodCount(String content){
         content = removeCommentsFromFile(content);
 
-        // Regular expression to match method declarations
+        //Regular expression to match method declarations
         String regex = "(?:(?:public|private|protected|static|final|native|synchronized|abstract|transient)+\\s+)+[$_\\w<>\\[\\]\\s]*\\s+[\\$_\\w]+\\([^\\)]*\\)?\\s*\\{?[^\\}]*\\}?";
 
-        // Create a Pattern object
+        //Create a Pattern object
         Pattern pattern = Pattern.compile(regex);
 
-        // Create a Matcher object
+        //Create a Matcher object
         Matcher matcher = pattern.matcher(content);
 
         int method_count = 0;
 
-        // Count the methods
+        //Count the methods
         while (matcher.find()) {
             String method_declaration = matcher.group(0);
             method_declaration = method_declaration.split("\n")[0];
@@ -308,7 +295,7 @@ public class App {
         return method_count;
     }
 
-
+    //Remove's comments from file content
     private static String removeCommentsFromFile(String content){
         //Remove all the content between comments
         content = removeContentBetweenDelimiters(content, "/*", "*/");
@@ -317,6 +304,7 @@ public class App {
         return content;
     }
 
+    //Get the amount of commented lines in a file
     private static int getCloc(String content){
         //Remove all the content between comments
         String data = getContentBetweenDelimiters(content);
@@ -335,9 +323,10 @@ public class App {
         return cloc;
     }
 
+    //Util function used by getCloc
     public static String getContentBetweenDelimiters(String content) {
         String data = "";
-        // Regular expression to match both block and single-line comments
+        //Regular expression to match both block and single-line comments
         String regex = "(\\/\\*[^*]*\\*+(?:[^/*][^*]*\\*+)*\\/|\\/\\/[^\\r\\n]*)";
         Pattern pattern = Pattern.compile(regex, Pattern.DOTALL);
         Matcher matcher = pattern.matcher(content);
@@ -367,7 +356,7 @@ public class App {
         return result.toString();
     }
 
-
+    //Identifies the package name for a given file
     private static String getPackageName(String content)throws IOException{
         String package_name = "";
         String package_pattern = "package\\s+([\\w.]+);";
@@ -379,6 +368,7 @@ public class App {
         return package_name;
     }
 
+    //Identifies the class name for a given file
     private static String getClassName(String content)throws IOException{
         content = removeCommentsFromFile(content);
         String class_name = "";
