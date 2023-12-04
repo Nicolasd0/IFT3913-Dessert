@@ -46,4 +46,11 @@ public class CurrencyTest {
             currencyConverter.Currency.convert(9000000., 5.);
         });
     }
+
+    @Test
+    public void testWhiteBox(){
+        //Ce test couvre l'entièreté des critère de tests boîte blanche
+        assertEquals("Conversion of 100 to another currency should be 300",
+        300, currencyConverter.Currency.convert(100.0, 3.0), 0);
+    }
 }
